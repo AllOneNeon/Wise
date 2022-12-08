@@ -7,6 +7,7 @@ class User(AbstractUser):
        USER = 'user'
        MODERATOR = 'moderator'
        ADMIN = 'admin'
+
     first_name = models.CharField(max_length=64)
     last_name = models.CharField(max_length=64)
     username = models.CharField(max_length=32, unique=True)
@@ -15,3 +16,4 @@ class User(AbstractUser):
     role = models.CharField(max_length=9, choices=Roles.choices)
     title = models.CharField(max_length=80)
     is_blocked = models.BooleanField(default=False)
+

@@ -18,6 +18,7 @@ COPY Pipfile.lock .
 RUN set -ex && pipenv install --deploy --system
 # RUN PIPENV_VENV_IN_PROJECT=1 pipenv install --deploy
 
+# RUN DJANGO_SUPERUSER_PASSWORD=aloalo python manage.py createsuperuser --noinput admin
 # # install dependencies
 # RUN pip install --upgrade pip
 # COPY ./requirements.txt .

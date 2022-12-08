@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 # python3 manage.py migrate
-
 # python3 manage.py runserver 0.0.0.0:8000
 
 #!/bin/sh
@@ -17,9 +16,18 @@ then
     echo "PostgreSQL started"
 fi
 
- python manage.py flush --no-input
- python manage.py migrate
+python manage.py makemigrations
+python manage.py migrate
+python manage.py createcachetable
 
- CMD python manage.py runserver
- 
+if [ "$DJANGO_SUPERUSER_USERNAME" ]
+then
+    python manage.py createsuperuser \
+        --noinput \
+        --username $DJANGO_SUPERUSER_USERNAME \
+        --email $DJANGO_SUPERUSER_EMAIL
+fi
+
+CMD python manage.py runserver
+
 exec "$@"
