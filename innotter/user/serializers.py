@@ -6,7 +6,7 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id', 'first_name', 'last_name', 'username',
          'email', 'image_s3_path', 'role', 'title', 'is_blocked']
-        kwargss = {'password': {'write_only': True}}
+        extra_kwargs = {'password': {'write_only': True}}
         
 
     def create(self, validated_data):
@@ -23,6 +23,15 @@ class UserSerializer(serializers.ModelSerializer):
         user.set_password(validated_data['password'])
         user.save()
         return user
+
+class LoginSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = (
+            "username",
+            "password",
+        )
+        extra_kwargs = {"password": {"write_only": True}}
         
 
 
