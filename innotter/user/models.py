@@ -21,24 +21,24 @@ class User(AbstractUser):
     title = models.CharField(max_length=80)
     is_blocked = models.BooleanField(default=False)
    
-    @property
-    def token(self):
-       return self._generate_jwt_token()
+   #  @property
+   #  def token(self):
+   #     return self._generate_jwt_token()
 
-    def get_full_name(self):
-       return self.username
+   #  def get_full_name(self):
+   #     return self.username
 
-    def get_short_name(self):
-       return self.username
+   #  def get_short_name(self):
+   #     return self.username
 
-    def _generate_jwt_token(self):
-       dt = datetime.now() + datetime.timedelta(days=30)
+   #  def _generate_jwt_token(self):
+   #     dt = datetime.now() + datetime.timedelta(days=30)
 
-       token = jwt.encode(
-            {
-            'id': self.pk,
-            'exp': dt.utcfromtimestamp(dt.timestamp())
-            },
-            SECRET_KEY, algorithm='HS256'
-        )
-       return token
+   #     token = jwt.encode(
+   #          {
+   #          'id': self.pk,
+   #          'exp': dt.utcfromtimestamp(dt.timestamp())
+   #          },
+   #          SECRET_KEY, algorithm='HS256'
+   #      )
+   #     return token

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import *
+from .models import Post
 
 class PostAdmin(admin.ModelAdmin):
     list_display = ('content', 'page', 'reply_to', 'created_at')

@@ -66,3 +66,5 @@ class UserViewSet(viewsets.ModelViewSet):
         else:
             perms = []
         return [permission() for permission in perms]
+    
+    
