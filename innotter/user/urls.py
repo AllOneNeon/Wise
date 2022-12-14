@@ -1,7 +1,5 @@
 from django.urls import path
-from .views import (
-    RegistrationAPIView, LoginAPIView, UserUpdateAPIView, UserModelViewSet
-)
+from .views import RegistrationAPIView, LoginAPIView, UserUpdateAPIView, UserModelViewSet
 from rest_framework.routers import DefaultRouter
 
 

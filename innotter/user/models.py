@@ -1,9 +1,7 @@
 import jwt
 from django.db import models
 from datetime import datetime, timedelta
-from django.contrib.auth.models import (
-    AbstractBaseUser, PermissionsMixin, BaseUserManager
-    )
+from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from innotter.settings import SECRET_KEY
 
 
