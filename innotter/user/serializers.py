@@ -46,7 +46,7 @@ class LoginSerializer(serializers.Serializer):
             )
         return {
             'email': user.email,
-            'username': user.username,
+            'username': user.username, # не возвращать словарь, есть data
             'token': user.token
         }
 

@@ -1,8 +1,9 @@
+from datetime import datetime
+
 import jwt
 from rest_framework import authentication, exceptions
 from .models import User
 from innotter.settings import SECRET_KEY
-
 
 class JWTAuthentication(authentication.BaseAuthentication):
     authentication_header_prefix = 'Token'
@@ -40,3 +41,7 @@ class JWTAuthentication(authentication.BaseAuthentication):
             msg = 'This user has been deactivated.'
             raise exceptions.AuthenticationFailed(msg)
         return (user, token)
+
+
+
+
