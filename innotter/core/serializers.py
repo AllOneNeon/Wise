@@ -1,65 +1,71 @@
 from rest_framework import serializers
-from .models import Page, Post, Subscriber
-from user.models import User
+
+from .models import *
 
 
-class PageSerializer(serializers.ModelSerializer):
-    owner = serializers.ReadOnlyField(source='owner.username')
-    posts = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
-    is_subscriber = serializers.SerializerMethodField()
-    is_follow_requests = serializers.SerializerMethodField()
+class PageAdminOrModerSerializer(serializers.ModelSerializer):
+    unblock_date = serializers.DateTimeField(default=None)
 
     class Meta:
         model = Page
-        fields = [
-            'id',
-            'owner',
-            'name',
-            'description',
-            'tag',
-            'image',
-            'is_private',
-            'count_followers',
-            'count_follow_requests',
-            'unblock_date',
-            'created_at',
-            'updated_at',
-            'posts',
-            'is_subscriber',
-            'is_follow_requests',
-        ]
+        fields = ('id', 'name', 'uuid', 'description', 'tags', 'owner', 'followers',
+                  'image', 'is_private', 'follow_requests', 'liked_posts', 'unblock_date')
 
-class PostSerializer(serializers.ModelSerializer):
-    is_fan = serializers.SerializerMethodField()
+        def update(self, instance, validated_data):
+            if validated_data['unblock_date']:
+                instance.unblock_date = validated_data['unblock_date']
+                instance.save()
+                validated_data.pop('unblock_date')
+            return instance
+
+
+class PageUserSerializer(serializers.ModelSerializer):
+    unblock_date = serializers.DateTimeField(default=None)
+
+    class Meta:
+        model = Page
+        fields = ('id', 'name', 'uuid', 'description', 'tags', 'owner', 'followers',
+                  'image', 'is_private', 'follow_requests', 'liked_posts', 'unblock_date')
+        read_only_fields = ('unblock_date', 'owner')
+
+
+class PageModelFollowRequestsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Page
+        fields = ('follow_requests', 'followers')
+
+    def update(self, instance, validated_data):
+        # updating accepted requests
+        if validated_data.get('accept_ids', False):
+            instance.followers.add(*validated_data['accept_ids'])
+            if instance.follow_requests:
+                instance.follow_requests.remove(*validated_data['accept_ids'])
+        # updating denied requests
+        if validated_data.get('deny_ids', False) and instance.follow_requests:
+            instance.follow_requests.remove(*validated_data['deny_ids'])
+        instance.save()
+        return instance
+
+
+class TagModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Tag
+        fields = '__all__'
+
+
+class PostModelSerializer(serializers.ModelSerializer):
+    likes = serializers.SerializerMethodField()
 
     class Meta:
         model = Post
-        fields = ('id', 'page', 'content', 'is_fan', 'total_likes',)
+        fields = '__all__'
+        extra_fields = ['likes']
+        extra_kwargs = {
+            'pages_that_liked': {'read_only': True},
+        }
 
-class LikeSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = (
-            'username',
-            'email',
-        )
-
-class SubscriberUserSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = [
-            'id',
-            'username',
-            'email',
-        ]
-
-
-class SubscriberSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Subscriber
-        fields = [
-            'id',
-            'subscriber',
-            'follower',
-            'follow_requests',
-        ]
+    def get_likes(self, obj):
+        """
+        Counting amount of likes
+        """
+        return obj.pages_that_liked.count()

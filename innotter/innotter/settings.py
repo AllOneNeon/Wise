@@ -14,7 +14,10 @@ from datetime import timedelta
 import os
 from pathlib import Path
 
+from dotenv import dotenv_values
+
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
+config = dotenv_values("/usr/src/app/.env")
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -39,8 +42,9 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-
+    
     'rest_framework',
+    'django_filters',
 
     'user',
     'core',
@@ -52,9 +56,10 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'innotter.middleware_jwt.JWTAuthenticationMiddleware', # custom middleware
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'innotter.middleware_jwt.JWTAuthenticationMiddleware',
+    
 ]
 
 ROOT_URLCONF = 'innotter.urls'
@@ -62,7 +67,7 @@ ROOT_URLCONF = 'innotter.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -138,22 +143,21 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 AUTH_USER_MODEL = 'user.User'
 
-REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        'user.jwt_auth.JWTAuthentication',
-        ),
-    'DEFAULT_PERMISSION_CLASSES': (
-        'rest_framework.permissions.IsAdminUser',
-        'rest_framework.permissions.AllowAny',
-        'rest_framework.permissions.IsAuthenticated',
-    )
-}
 
+REST_FRAMEWORK = {
+    'DEFAULT_PERMISSION_CLASSES': [
+        # 'rest_framework.permissions.AllowAny',
+    ],
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+
+    ),
+    'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend']
+}
 
 CUSTOM_JWT = {
   'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
   'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
-  'REFRESH_TOKEN_LIFETIME_MODEL': 30,
+  'REFRESH_TOKEN_LIFETIME_MODEL': 30,  # in days
   'ROTATE_REFRESH_TOKENS': False,
   'BLACKLIST_AFTER_ROTATION': True,
   'UPDATE_LAST_LOGIN': False,
@@ -174,11 +178,13 @@ CUSTOM_JWT = {
   'SLIDING_TOKEN_LIFETIME': timedelta(minutes=10),
   'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
 
+  # custom
   'AUTH_COOKIE': 'access_token',  # Cookie name. Enables cookies if value is set# .
   'AUTH_COOKIE_REFRESH': 'refresh_token',
   'AUTH_COOKIE_DOMAIN': None,     # A string like "example.com", or None for standard domain cookie.
   'AUTH_COOKIE_SECURE': False,    # Whether the auth cookies should be secure (https:// only).
-  'AUTH_COOKIE_HTTP_ONLY': True, # Http only cookie flag.It's not fetch by javascript.
+  'AUTH_COOKIE_HTTP_ONLY': True,  # Http only cookie flag.It's not fetch by javascript.
   'AUTH_COOKIE_PATH': '/',        # The path of the auth cookie.
-  'AUTH_COOKIE_SAMESITE': 'Lax',  # Whether to set the flag restricting cookie leaks on cross-site requests. This can be 'Lax', 'Strict', or None to disable the flag.
+  'AUTH_COOKIE_SAMESITE': 'Lax',  # Whether to set the flag restricting cookie leaks on cross-site requests.\
+                                  # This can be 'Lax', 'Strict', or None to disable the flag.
 }

@@ -1,17 +1,19 @@
 from django.contrib import admin
 
-from .models import Page, Post, Subscriber
+from .models import *
 
 class PageAdmin(admin.ModelAdmin):
-    list_display = ['id', 'owner', 'name', ]
+    list_display = ('name', 'owner', 'is_private')
+    search_fields = ('owner', 'name', 'description')
+    list_editable = ('is_private',)
+    list_filter = ('is_private', 'tags')
 
 class PostAdmin(admin.ModelAdmin):
-    list_display = ['id', 'page', ]
+    list_display = ('content', 'page', 'reply_to', 'created_at')
+    search_fields = ('page', 'content')
+    list_filter = ('page', 'created_at', 'updated_at')
 
-class SubscriberAdmin(admin.ModelAdmin):
-    list_display = ['subscriber', 'follower', 'follow_requests', ]
 
-
-admin.site.register(Subscriber, SubscriberAdmin)
-admin.site.register(Post, PostAdmin)
+admin.site.register(Tag)
 admin.site.register(Page, PageAdmin)
+admin.site.register(Post, PostAdmin)

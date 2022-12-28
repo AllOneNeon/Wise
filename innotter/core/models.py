@@ -1,38 +1,39 @@
 from django.db import models
-import uuid
-from user.models import User
 
-class Page(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    owner = models.ForeignKey('user.User', on_delete=models.CASCADE, related_name='pages')
-    name = models.CharField(max_length=80)
-    description = models.TextField()
-    tag = models.ForeignKey('Tag', on_delete=models.CASCADE, related_name='tags')
-    image = models.FileField(max_length=30, null=True, blank=True)
-    is_private = models.BooleanField(default=False)
-    count_followers = models.IntegerField(default=0)
-    count_follow_requests = models.IntegerField(default=0)
-    unblock_date = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True, auto_now=False)
-    updated_at = models.DateTimeField(auto_now=True, auto_now_add=False)
 
 class Tag(models.Model):
     name = models.CharField(max_length=30, unique=True)
 
+    def __str__(self):
+        return self.name
+
+class Page(models.Model):
+    name = models.CharField(max_length=80, unique=True)
+    uuid = models.UUIDField(max_length=30, unique=True)  # example:3422b448-2460-4fd2-9183-8000de6f8343
+    description = models.TextField()
+    tags = models.ManyToManyField(Tag, related_name='tags', blank=True)
+    owner = models.ForeignKey('user.User', on_delete=models.CASCADE, related_name='pages')
+    followers = models.ManyToManyField('user.User', related_name='followers', null=True, blank=True)
+    image = models.URLField(null=True, blank=True)
+    is_private = models.BooleanField(default=False)
+    follow_requests = models.ManyToManyField('user.User', related_name='follow_requests', null=True, blank=True)
+    liked_posts = models.ManyToManyField('core.Post', related_name='liked_posts', null=True, blank=True)
+    unblock_date = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = 'Page'
+        verbose_name_plural = 'Pages'
+
 class Post(models.Model):
-    page = models.ForeignKey('Page', on_delete=models.CASCADE, related_name='posts')
+    page = models.ForeignKey('core.Page', on_delete=models.CASCADE, related_name='posts')
     content = models.CharField(max_length=180)
-    reply_to = models.ForeignKey('Post', on_delete=models.SET_NULL, null=True, blank=True, related_name='replies')
+    reply_to = models.ForeignKey('core.Post', on_delete=models.SET_NULL, null=True, related_name='replies', blank=True)
+    pages_that_liked = models.ManyToManyField('core.Page', related_name='pages_that_liked', null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    total_likes = models.IntegerField(default=0)
 
-class Like(models.Model):
-    user = models.ForeignKey(User, related_name='likes', on_delete=models.CASCADE)
-    post = models.ForeignKey('Post', related_name='like_post', on_delete=models.CASCADE)
-
-class Subscriber(models.Model):
-    subscriber = models.ForeignKey(User, related_name='subscribers', on_delete=models.CASCADE)
-    follower = models.ForeignKey('Page', related_name='followers', on_delete=models.CASCADE, blank=True, null=True,)
-    follow_requests = models.ForeignKey('Page', related_name='follow_requests', on_delete=models.CASCADE, blank=True, null=True)
-
+    def __str__(self):
+        return self.content

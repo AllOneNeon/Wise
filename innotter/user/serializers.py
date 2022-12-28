@@ -1,74 +1,44 @@
 from rest_framework import serializers
-from django.contrib.auth import authenticate
+
 from .models import User
-
-
-class RegistrationSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(
-        max_length=128,
-        min_length=8,
-        write_only=True
-    )
-    token = serializers.CharField(max_length=255, read_only=True)
-
-    class Meta:
-        model = User
-        fields = ['username', 'email', 'password', 'token']
-
-    def create(self, validated_data):
-        return User.objects.create_user(**validated_data)
-
-class LoginSerializer(serializers.Serializer):
-    email = serializers.EmailField(allow_blank=False)
-    username = serializers.CharField(max_length=255, read_only=True)
-    password = serializers.CharField(max_length=128, write_only=True)
-    token = serializers.CharField(max_length=255, read_only=True)
-
-    def validate(self, data):
-        email = data.get('email', None)
-        password = data.get('password', None)
-        if email is None:
-            raise serializers.ValidationError(
-                'An email address is required to log in.'
-            )
-        if password is None:
-            raise serializers.ValidationError(
-                'A password is required to log in.'
-            )
-        user = authenticate(username=email, password=password)
-        if user is None:
-            raise serializers.ValidationError(
-                'A user with this email and password was not found.'
-            )
-        if not user.is_active:
-            raise serializers.ValidationError(
-                'This user has been deactivated.'
-            )
-        return {
-            'email': user.email,
-            'username': user.username, # не возвращать словарь, есть data
-            'token': user.token
-        }
+from .services import block_all_users_pages, unblock_all_users_pages
 
 
 class UserSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(
-        max_length=128,
-        min_length=8,
-        write_only=True
-    )
-
     class Meta:
         model = User
-        fields = ('email', 'username', 'password', 'token',)
-        read_only_fields = ('token',)
+        fields = ('id', 'username', 'password', 'email', 'title', 'role', 'is_blocked',
+                  'followed_pages', 'requested_pages')
+        extra_kwargs = {'password': {'write_only': True}}
+        read_only_fields = ('followed_pages', 'requested_pages')
+
+    def create(self, validated_data):
+        user = User(
+            email=validated_data['email'],
+            username=validated_data['username'],
+            role='user',
+            title=validated_data['title'],
+            is_blocked=False,
+        )
+        user.set_password(validated_data['password'])
+        user.save()
+        return user
 
     def update(self, instance, validated_data):
-        password = validated_data.pop('password', None)
-
-        for key, value in validated_data.items():
-            setattr(instance, key, value)
-        if password is not None:
-            instance.set_password(password)
+        instance.username = validated_data.get('username', instance.username)
+        instance.password = validated_data.get('password', instance.password)
+        # validated_data.pop('password')
+        instance.email = validated_data.get('email', instance.email)
+        instance.title = validated_data.get('title', instance.title)
+        instance.image_s3_path = validated_data.get('image_s3_path', instance.image_s3_path)
+        instance.role = validated_data.get('role', instance.role)
+        instance.is_blocked = validated_data.get('is_blocked', instance.is_blocked)
         instance.save()
+        if instance.role == 'admin':
+            instance.is_staff = True
+            instance.is_superuser = True
+        if instance.is_blocked:
+            block_all_users_pages(instance)
+        else:
+            unblock_all_users_pages(instance)
         return instance

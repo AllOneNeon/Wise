@@ -16,7 +16,19 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
+from core.views import SearchPageViewSet, FeedViewSet
+from user.views import CreateTokenView, RefreshTokenView, SearchUserViewSet
+
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', include('innotter.api_urls', namespace='api')),
+    path('api/v1/user/', include('user.urls')),
+    path('api/v1/page/', include('core.urls')),
+    path('api/v1/post/', include('core.urls')),
+    path('api/v1/feed/', FeedViewSet.as_view({'get': 'list'}), name='feed'),
+    path('api/v1/search/user/', SearchUserViewSet.as_view({'get': 'list'}), name='search-user'),
+    path('api/v1/search/page/', SearchPageViewSet.as_view({'get': 'list'}), name='search-page'),
+
+    # JWT token urls
+    path('api/v1/token/create/', CreateTokenView.as_view(), name='token_create'),
+    path('api/v1/token/refresh/', RefreshTokenView.as_view(), name='token_refresh'),
 ]

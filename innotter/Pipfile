@@ -55,6 +55,7 @@ markdown = "*"
 routers = "*"
 psycopg2-binary = "*"
 datetime = "*"
+filters-django = "*"
 
 [dev-packages]
 

@@ -1,12 +1,9 @@
-from .views import PageModelViewSet, PostLikeModelViewSet, PostModelViewSet, SubscriberModelViewSet
 from rest_framework.routers import DefaultRouter
-
-
-app_name = 'core'
+from .views import *
 
 router = DefaultRouter()
-router.register(r'', PageModelViewSet, basename='pages')
-router.register(r'posts', PostModelViewSet, basename='posts')
-router.register(r'likes', PostLikeModelViewSet, basename='likes')
-router.register(r'', SubscriberModelViewSet, basename='subscribers')
+router.register(r'tag', TagViewSet, basename='tag')
+router.register(r'', PageViewSet, basename='page')
+router.register(r'', PostViewSet, basename='post')
 urlpatterns = router.urls
+

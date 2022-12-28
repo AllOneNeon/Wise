@@ -1,11 +1,14 @@
-from rest_framework import status, viewsets, filters
-from rest_framework.generics import RetrieveUpdateAPIView
-from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
+import django_filters.rest_framework
+from rest_framework import mixins, parsers, renderers, status, viewsets
+from rest_framework.authtoken.serializers import AuthTokenSerializer
+from rest_framework.generics import GenericAPIView
 from rest_framework.response import Response
-from rest_framework.views import APIView
-from .serializers import  UserSerializer#, LoginSerializer, RegistrationSerializer,
-from .models import User
+
 from .permissions import *
+from .serializers import UserSerializer
+
+from .services import *
+
 
 class UserViewSet(viewsets.ModelViewSet):
     """ViewSet for all User objects"""
@@ -19,51 +22,89 @@ class UserViewSet(viewsets.ModelViewSet):
         'create': (permissions.AllowAny,),
         'list': (permissions.IsAuthenticated, IsAdmin,),
         'retrieve': (permissions.IsAuthenticated,),
+        'image': (permissions.IsAuthenticated, IsUserOwnerOrAdmin,)
     }
 
-# переделать на viewset
-# class RegistrationAPIView(APIView):
-#     permission_classes = (AllowAny,)
-#     serializer_class = RegistrationSerializer
+    # a method that set permissions depending on http request methods
+    def get_permissions(self):
+        if self.action in self.permissions_dict:
+            perms = self.permissions_dict[self.action]
+        else:
+            perms = []
+        return [permission() for permission in perms]
 
-#     def post(self, request):
-#         user = request.data
-#         serializer = self.serializer_class(data=user)
-#         serializer.is_valid(raise_exception=True)
-#         serializer.save()
-#         return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+class CreateTokenView(GenericAPIView):
+    throttle_classes = ()
+    permission_classes = (permissions.AllowAny,)
+    parser_classes = (parsers.FormParser, parsers.MultiPartParser, parsers.JSONParser,)
+    renderer_classes = (renderers.JSONRenderer,)
+    serializer_class = AuthTokenSerializer
 
-# class LoginAPIView(APIView):
-#     permission_classes = (AllowAny,)
-#     serializer_class = LoginSerializer
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid():
+            user = serializer.validated_data['user']
+            token = generate_access_token(user)
+            refresh_token = generate_refresh_token()
+            set_refresh_token(refresh_token=refresh_token, user=user)
+            response = Response({'access_token': token, 'refresh_token': refresh_token})
+            response.set_cookie(
+                key=settings.CUSTOM_JWT['AUTH_COOKIE'],
+                value=token,
+                expires=settings.CUSTOM_JWT['ACCESS_TOKEN_LIFETIME'],
+                secure=settings.CUSTOM_JWT['AUTH_COOKIE_SECURE'],
+                httponly=settings.CUSTOM_JWT['AUTH_COOKIE_HTTP_ONLY'],
+                samesite=settings.CUSTOM_JWT['AUTH_COOKIE_SAMESITE']
+            )
+            response.set_cookie(
+                key=settings.CUSTOM_JWT['AUTH_COOKIE_REFRESH'],
+                value=refresh_token,
+                expires=settings.CUSTOM_JWT['REFRESH_TOKEN_LIFETIME'],
+                secure=settings.CUSTOM_JWT['AUTH_COOKIE_SECURE'],
+                httponly=settings.CUSTOM_JWT['AUTH_COOKIE_HTTP_ONLY'],
+                samesite=settings.CUSTOM_JWT['AUTH_COOKIE_SAMESITE']
+            )
 
-#     def post(self, request):
-#         user = request.data
-#         serializer = self.serializer_class(data=user)
-#         serializer.is_valid(raise_exception=True)
-#         return Response(serializer.data, status=status.HTTP_200_OK)
+            return response
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# class UserUpdateAPIView(RetrieveUpdateAPIView):
-#     permission_classes = (IsAuthenticated,)
-#     serializer_class = UserSerializer
 
-#     def retrieve(self, request, *args, **kwargs):
-#         serializer = self.serializer_class(request.user)
-#         return Response(serializer.data, status=status.HTTP_200_OK)
+class RefreshTokenView(GenericAPIView):
+    throttle_classes = ()
+    permission_classes = (permissions.AllowAny,)
+    parser_classes = (parsers.FormParser, parsers.MultiPartParser, parsers.JSONParser,)
+    renderer_classes = (renderers.JSONRenderer,)
+    serializer_class = AuthTokenSerializer
 
-#     def update(self, request, *args, **kwargs):
-#         serializer_data = request.data
-#         serializer = self.serializer_class(
-#             request.user, data=serializer_data, partial=True
-#         )
-#         serializer.is_valid(raise_exception=True)
-#         serializer.save()
-#         return Response(serializer.data, status=status.HTTP_200_OK)
+    def post(self, request):
+        refresh_token = request.COOKIES.get(settings.CUSTOM_JWT['AUTH_COOKIE_REFRESH'])
+        new_tokens = check_and_update_refresh_token(refresh_token)
+        if refresh_token and new_tokens:
+            response = Response(new_tokens)
+            response.set_cookie(
+                key=settings.CUSTOM_JWT['AUTH_COOKIE'],
+                value=new_tokens[settings.CUSTOM_JWT['AUTH_COOKIE']],
+                expires=settings.CUSTOM_JWT['ACCESS_TOKEN_LIFETIME'],
+                secure=settings.CUSTOM_JWT['AUTH_COOKIE_SECURE'],
+                httponly=settings.CUSTOM_JWT['AUTH_COOKIE_HTTP_ONLY'],
+                samesite=settings.CUSTOM_JWT['AUTH_COOKIE_SAMESITE']
+            )
+            response.set_cookie(
+                key=settings.CUSTOM_JWT['AUTH_COOKIE_REFRESH'],
+                value=new_tokens[settings.CUSTOM_JWT['AUTH_COOKIE_REFRESH']],
+                expires=settings.CUSTOM_JWT['REFRESH_TOKEN_LIFETIME'],
+                secure=settings.CUSTOM_JWT['AUTH_COOKIE_SECURE'],
+                httponly=settings.CUSTOM_JWT['AUTH_COOKIE_HTTP_ONLY'],
+                samesite=settings.CUSTOM_JWT['AUTH_COOKIE_SAMESITE']
+            )
+            return response
+        return Response({'message': "Your token isn't valid"})
 
-# class UserModelViewSet(viewsets.ModelViewSet):
-#     queryset = User.objects.all()
-#     serializer_class = UserSerializer
-#     permission_classes = (IsAuthenticatedOrReadOnly,)
-#     filter_backends = [filters.SearchFilter]
-#     search_fields = ['username', 'email', ]
 
+class SearchUserViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
+    serializer_class = UserSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = User.objects.all()
+    filter_backends = (django_filters.rest_framework.DjangoFilterBackend,)
+    filterset_fields = ('username', 'email')
