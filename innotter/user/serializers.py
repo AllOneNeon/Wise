@@ -31,7 +31,6 @@ class UserSerializer(serializers.ModelSerializer):
         # validated_data.pop('password')
         instance.email = validated_data.get('email', instance.email)
         instance.title = validated_data.get('title', instance.title)
-        instance.image_s3_path = validated_data.get('image_s3_path', instance.image_s3_path)
         instance.role = validated_data.get('role', instance.role)
         instance.is_blocked = validated_data.get('is_blocked', instance.is_blocked)
         instance.save()
