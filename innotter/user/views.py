@@ -33,7 +33,7 @@ class UserViewSet(viewsets.ModelViewSet):
             perms = []
         return [permission() for permission in perms]
 
-    
+
 class CreateTokenView(GenericAPIView):
     throttle_classes = ()
     permission_classes = (permissions.AllowAny,)
@@ -50,20 +50,20 @@ class CreateTokenView(GenericAPIView):
             set_refresh_token(refresh_token=refresh_token, user=user)
             response = Response({'access_token': token, 'refresh_token': refresh_token})
             response.set_cookie(
-                key=settings.CUSTOM_JWT['AUTH_COOKIE'],
+                key=innotter.settings.CUSTOM_JWT['AUTH_COOKIE'],
                 value=token,
-                expires=settings.CUSTOM_JWT['ACCESS_TOKEN_LIFETIME'],
-                secure=settings.CUSTOM_JWT['AUTH_COOKIE_SECURE'],
-                httponly=settings.CUSTOM_JWT['AUTH_COOKIE_HTTP_ONLY'],
-                samesite=settings.CUSTOM_JWT['AUTH_COOKIE_SAMESITE']
+                expires=innotter.settings.CUSTOM_JWT['ACCESS_TOKEN_LIFETIME'],
+                secure=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_SECURE'],
+                httponly=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_HTTP_ONLY'],
+                samesite=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_SAMESITE']
             )
             response.set_cookie(
-                key=settings.CUSTOM_JWT['AUTH_COOKIE_REFRESH'],
+                key=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_REFRESH'],
                 value=refresh_token,
-                expires=settings.CUSTOM_JWT['REFRESH_TOKEN_LIFETIME'],
-                secure=settings.CUSTOM_JWT['AUTH_COOKIE_SECURE'],
-                httponly=settings.CUSTOM_JWT['AUTH_COOKIE_HTTP_ONLY'],
-                samesite=settings.CUSTOM_JWT['AUTH_COOKIE_SAMESITE']
+                expires=innotter.settings.CUSTOM_JWT['REFRESH_TOKEN_LIFETIME'],
+                secure=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_SECURE'],
+                httponly=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_HTTP_ONLY'],
+                samesite=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_SAMESITE']
             )
 
             return response
@@ -78,25 +78,25 @@ class RefreshTokenView(GenericAPIView):
     serializer_class = AuthTokenSerializer
 
     def post(self, request):
-        refresh_token = request.COOKIES.get(settings.CUSTOM_JWT['AUTH_COOKIE_REFRESH'])
+        refresh_token = request.COOKIES.get(innotter.settings.CUSTOM_JWT['AUTH_COOKIE_REFRESH'])
         new_tokens = check_and_update_refresh_token(refresh_token)
         if refresh_token and new_tokens:
             response = Response(new_tokens)
             response.set_cookie(
-                key=settings.CUSTOM_JWT['AUTH_COOKIE'],
-                value=new_tokens[settings.CUSTOM_JWT['AUTH_COOKIE']],
-                expires=settings.CUSTOM_JWT['ACCESS_TOKEN_LIFETIME'],
-                secure=settings.CUSTOM_JWT['AUTH_COOKIE_SECURE'],
-                httponly=settings.CUSTOM_JWT['AUTH_COOKIE_HTTP_ONLY'],
-                samesite=settings.CUSTOM_JWT['AUTH_COOKIE_SAMESITE']
+                key=innotter.settings.CUSTOM_JWT['AUTH_COOKIE'],
+                value=new_tokens[innotter.settings.CUSTOM_JWT['AUTH_COOKIE']],
+                expires=innotter.settings.CUSTOM_JWT['ACCESS_TOKEN_LIFETIME'],
+                secure=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_SECURE'],
+                httponly=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_HTTP_ONLY'],
+                samesite=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_SAMESITE']
             )
             response.set_cookie(
-                key=settings.CUSTOM_JWT['AUTH_COOKIE_REFRESH'],
-                value=new_tokens[settings.CUSTOM_JWT['AUTH_COOKIE_REFRESH']],
-                expires=settings.CUSTOM_JWT['REFRESH_TOKEN_LIFETIME'],
-                secure=settings.CUSTOM_JWT['AUTH_COOKIE_SECURE'],
-                httponly=settings.CUSTOM_JWT['AUTH_COOKIE_HTTP_ONLY'],
-                samesite=settings.CUSTOM_JWT['AUTH_COOKIE_SAMESITE']
+                key=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_REFRESH'],
+                value=new_tokens[innotter.settings.CUSTOM_JWT['AUTH_COOKIE_REFRESH']],
+                expires=innotter.settings.CUSTOM_JWT['REFRESH_TOKEN_LIFETIME'],
+                secure=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_SECURE'],
+                httponly=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_HTTP_ONLY'],
+                samesite=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_SAMESITE']
             )
             return response
         return Response({'message': "Your token isn't valid"})

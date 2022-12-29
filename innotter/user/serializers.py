@@ -3,6 +3,7 @@ from rest_framework import serializers
 from .models import User
 from .services import block_all_users_pages, unblock_all_users_pages
 
+from django.contrib.auth import authenticate
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:

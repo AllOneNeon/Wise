@@ -9,7 +9,6 @@ from core.models import Page
 from .models import RefreshToken
 
 
-
 def unblock_all_users_pages(user):
     unblock_date = timezone.now()
     Page.objects.filter(owner=user).update(unblock_date=unblock_date)
@@ -28,7 +27,6 @@ def generate_access_token(user):
         'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=10)
     }, innotter.settings.SECRET_KEY)
     return token
-
 
 def generate_refresh_token():
     refresh_token = jwt.encode({
