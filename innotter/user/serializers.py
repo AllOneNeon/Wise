@@ -1,44 +1,90 @@
 from rest_framework import serializers
+from user.models import User
+from user.utils import (UserLoginSerializerMethods,
+                         UserRefreshSerializerMethods,
+                         UserRegistrationSerializerMethods)
 
-from .models import User
-from .services import block_all_users_pages, unblock_all_users_pages
 
-from django.contrib.auth import authenticate
+class UserListSerializer(serializers.ModelSerializer):
+    """
+    Serializer for list of users
+    Methods: list
+    Only for admin
+    """
 
-class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'username', 'password', 'email', 'title', 'role', 'is_blocked',
-                  'followed_pages', 'requested_pages')
-        extra_kwargs = {'password': {'write_only': True}}
-        read_only_fields = ('followed_pages', 'requested_pages')
+        fields = ("id", "username", "title", "email", "role", "is_blocked")
 
-    def create(self, validated_data):
-        user = User(
-            email=validated_data['email'],
-            username=validated_data['username'],
-            role='user',
-            title=validated_data['title'],
-            is_blocked=False,
+
+class UserDetailSerializer(serializers.ModelSerializer):
+    """
+    Seriazizer for separate user
+    Methods: retrieve, update (only 'is_blocked' and 'role' fields)
+    Only for admin
+    """
+
+    class Meta:
+        model = User
+        fields = (
+            "id",
+            "username",
+            "title",
+            "email",
+            "role",
+            "image_s3_path",
+            "is_blocked",
         )
-        user.set_password(validated_data['password'])
-        user.save()
-        return user
+        read_only_fields = ("id", "username", "title", "email", "image")
 
-    def update(self, instance, validated_data):
-        instance.username = validated_data.get('username', instance.username)
-        instance.password = validated_data.get('password', instance.password)
-        # validated_data.pop('password')
-        instance.email = validated_data.get('email', instance.email)
-        instance.title = validated_data.get('title', instance.title)
-        instance.role = validated_data.get('role', instance.role)
-        instance.is_blocked = validated_data.get('is_blocked', instance.is_blocked)
-        instance.save()
-        if instance.role == 'admin':
-            instance.is_staff = True
-            instance.is_superuser = True
-        if instance.is_blocked:
-            block_all_users_pages(instance)
-        else:
-            unblock_all_users_pages(instance)
-        return instance
+    is_blocked = serializers.BooleanField()
+
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    """
+    Seriazizer for user profile
+    User can check his profile and update it
+    """
+
+    class Meta:
+        model = User
+        fields = (
+            "id",
+            "username",
+            "title",
+            "email",
+            "role",
+            "image_s3_path",
+        )
+        read_only_fields = (
+            "username",
+            "title",
+            "email",
+            "role",
+        )
+
+
+class UserRegistrationSerializer(UserRegistrationSerializerMethods):
+    """Serialization of user registration and creation of a new one"""
+
+    class Meta:
+        model = User
+        fields = ("id", "username", "title", "email", "password")
+        extra_kwargs = {"password": {"write_only": True}}
+
+
+class UserLoginSerializer(UserLoginSerializerMethods):
+    """Serializer for user getting access and refresh tokens"""
+
+    email = serializers.EmailField(required=True, write_only=True)
+    password = serializers.CharField(required=True, write_only=True)
+    access = serializers.CharField(read_only=True)
+    refresh = serializers.CharField(read_only=True)
+
+
+class UserRefreshSerializer(UserRefreshSerializerMethods):
+    """Serializer for getting refresh token"""
+
+    refresh_token = serializers.CharField(required=True, write_only=True)
+    access = serializers.CharField(read_only=True)
+    refresh = serializers.CharField(read_only=True)

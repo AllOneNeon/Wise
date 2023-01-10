@@ -1,110 +1,123 @@
-import django_filters.rest_framework
-from rest_framework import mixins, parsers, renderers, status, viewsets
-from rest_framework.authtoken.serializers import AuthTokenSerializer
-from rest_framework.generics import GenericAPIView
+from core.message_broker import publish
+from rest_framework import mixins, status
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.viewsets import GenericViewSet
+from user.models import User
+from user.permissions import IsAdminRole, IsBlockedUser
+from user.serializers import (UserDetailSerializer, UserListSerializer,
+                               UserLoginSerializer, UserProfileSerializer,
+                               UserRefreshSerializer,
+                               UserRegistrationSerializer)
+from user.services import (block_or_unblock_all_pages, get_presigned_url,
+                            set_access_to_admin_panel, upload_user_image_to_s3)
 
-from .permissions import *
-from .serializers import UserSerializer
 
-from .services import *
+class UserViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin, mixins.ListModelMixin, GenericViewSet):
+    """
+    Users viewset
+    Only for admin
+    """
+
+    queryset = User.objects.all().order_by("id")
+    permission_classes = (
+        IsAuthenticated,
+        IsAdminRole,
+    )
+
+    def get_serializer_class(self):
+        if self.action in ("retrieve", "update", "partial_update", "get_user_profile"):
+            return UserDetailSerializer
+        return UserListSerializer
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        image_s3_key = serializer.data["image_s3_path"]
+        if image_s3_key:
+            serialized_data = serializer.data
+            serialized_data["image_s3_path"] = get_presigned_url(key=image_s3_key)
+            return Response(serialized_data)
+        return Response(serializer.data)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        if "is_blocked" in request.data:
+            block_or_unblock_all_pages(user=instance)
+        elif "role" in request.data:
+            set_access_to_admin_panel(user=instance)
+        return Response(serializer.data)
 
 
-class UserViewSet(viewsets.ModelViewSet):
-    """ViewSet for all User objects"""
+class UserProfileViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin, mixins.ListModelMixin, GenericViewSet):
+    """
+    Users profile viewset
+    """
+
+    permission_classes = (IsAuthenticated, ~IsBlockedUser)
+    serializer_class = UserProfileSerializer
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        image_s3_key = serializer.data["image_s3_path"]
+        if image_s3_key:
+            serialized_data = serializer.data
+            serialized_data["image_s3_path"] = get_presigned_url(key=image_s3_key)
+            return Response(serialized_data)
+        return Response(serializer.data)
+
+    def perform_update(self, serializer):
+        image_s3_path = serializer.validated_data["image_s3_path"]
+        serializer.validated_data["image_s3_path"] = upload_user_image_to_s3(
+            file_path=image_s3_path, user=self.request.user
+        )
+
+    def get_queryset(self):
+        return User.objects.filter(username=self.request.user)
+
+
+class UserRegistrationViewSet(mixins.CreateModelMixin, GenericViewSet):
+    """
+    User registration view set (creating new account)
+    """
+
     queryset = User.objects.all()
-    serializer_class = UserSerializer
-    permission_classes = []
-    permissions_dict = {
-        'partial_update': (permissions.IsAuthenticated, IsUserOwnerOrAdmin),
-        'update': (permissions.IsAuthenticated, IsUserOwnerOrAdmin),
-        'destroy': (permissions.IsAuthenticated, IsUserOwnerOrAdmin),
-        'create': (permissions.AllowAny,),
-        'list': (permissions.IsAuthenticated, IsAdmin,),
-        'retrieve': (permissions.IsAuthenticated,),
-        'image': (permissions.IsAuthenticated, IsUserOwnerOrAdmin,)
-    }
+    serializer_class = UserRegistrationSerializer
+    permission_classes = (AllowAny,)
 
-    # a method that set permissions depending on http request methods
-    def get_permissions(self):
-        if self.action in self.permissions_dict:
-            perms = self.permissions_dict[self.action]
-        else:
-            perms = []
-        return [permission() for permission in perms]
+    def perform_create(self, serializer):
+        serializer.save()
+        data = {"method": "new_user", "id": serializer.data["id"]}
+        publish(body=data)
 
 
-class CreateTokenView(GenericAPIView):
-    throttle_classes = ()
-    permission_classes = (permissions.AllowAny,)
-    parser_classes = (parsers.FormParser, parsers.MultiPartParser, parsers.JSONParser,)
-    renderer_classes = (renderers.JSONRenderer,)
-    serializer_class = AuthTokenSerializer
+class UserLoginViewSet(mixins.CreateModelMixin, GenericViewSet):
+    """
+    User login viewset (getting access and refresh token)
+    """
 
-    def post(self, request):
-        serializer = self.serializer_class(data=request.data)
-        if serializer.is_valid():
-            user = serializer.validated_data['user']
-            token = generate_access_token(user)
-            refresh_token = generate_refresh_token()
-            set_refresh_token(refresh_token=refresh_token, user=user)
-            response = Response({'access_token': token, 'refresh_token': refresh_token})
-            response.set_cookie(
-                key=innotter.settings.CUSTOM_JWT['AUTH_COOKIE'],
-                value=token,
-                expires=innotter.settings.CUSTOM_JWT['ACCESS_TOKEN_LIFETIME'],
-                secure=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_SECURE'],
-                httponly=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_HTTP_ONLY'],
-                samesite=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_SAMESITE']
-            )
-            response.set_cookie(
-                key=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_REFRESH'],
-                value=refresh_token,
-                expires=innotter.settings.CUSTOM_JWT['REFRESH_TOKEN_LIFETIME'],
-                secure=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_SECURE'],
-                httponly=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_HTTP_ONLY'],
-                samesite=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_SAMESITE']
-            )
-
-            return response
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class RefreshTokenView(GenericAPIView):
-    throttle_classes = ()
-    permission_classes = (permissions.AllowAny,)
-    parser_classes = (parsers.FormParser, parsers.MultiPartParser, parsers.JSONParser,)
-    renderer_classes = (renderers.JSONRenderer,)
-    serializer_class = AuthTokenSerializer
-
-    def post(self, request):
-        refresh_token = request.COOKIES.get(innotter.settings.CUSTOM_JWT['AUTH_COOKIE_REFRESH'])
-        new_tokens = check_and_update_refresh_token(refresh_token)
-        if refresh_token and new_tokens:
-            response = Response(new_tokens)
-            response.set_cookie(
-                key=innotter.settings.CUSTOM_JWT['AUTH_COOKIE'],
-                value=new_tokens[innotter.settings.CUSTOM_JWT['AUTH_COOKIE']],
-                expires=innotter.settings.CUSTOM_JWT['ACCESS_TOKEN_LIFETIME'],
-                secure=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_SECURE'],
-                httponly=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_HTTP_ONLY'],
-                samesite=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_SAMESITE']
-            )
-            response.set_cookie(
-                key=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_REFRESH'],
-                value=new_tokens[innotter.settings.CUSTOM_JWT['AUTH_COOKIE_REFRESH']],
-                expires=innotter.settings.CUSTOM_JWT['REFRESH_TOKEN_LIFETIME'],
-                secure=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_SECURE'],
-                httponly=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_HTTP_ONLY'],
-                samesite=innotter.settings.CUSTOM_JWT['AUTH_COOKIE_SAMESITE']
-            )
-            return response
-        return Response({'message': "Your token isn't valid"})
-
-
-class SearchUserViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
-    serializer_class = UserSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = UserLoginSerializer
     queryset = User.objects.all()
-    filter_backends = (django_filters.rest_framework.DjangoFilterBackend,)
-    filterset_fields = ('username', 'email')
+    permission_classes = (AllowAny,)
+
+
+class RefreshLoginViewSet(mixins.CreateModelMixin, GenericViewSet):
+    """
+    User refresh viewset (refreshing token)
+    """
+
+    queryset = User.objects.all()
+    serializer_class = UserRefreshSerializer
+    permission_classes = (AllowAny,)
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_202_ACCEPTED, headers=headers)

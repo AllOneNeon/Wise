@@ -1,9 +1,16 @@
-from django.urls import path
-from rest_framework.routers import DefaultRouter
+from django.urls import include, path
+from rest_framework import routers
+from user.views import (RefreshLoginViewSet, UserLoginViewSet,
+                         UserProfileViewSet, UserRegistrationViewSet,
+                         UserViewSet)
 
-from .views import UserViewSet
+router = routers.DefaultRouter()
+router.register(r"users", UserViewSet, basename="users")
+router.register(r"profile", UserProfileViewSet, basename="profile")
+router.register(r"registration", UserRegistrationViewSet, basename="registration")
+router.register(r"login", UserLoginViewSet, basename="login")
+router.register(r"refresh", RefreshLoginViewSet, basename="refresh")
 
-
-router = DefaultRouter()
-router.register(r'', UserViewSet, basename='user')
-urlpatterns = router.urls
+urlpatterns = [
+    path("", include(router.urls)),
+]

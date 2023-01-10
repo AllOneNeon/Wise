@@ -1,248 +1,425 @@
-import datetime
-
-import django_filters.rest_framework
-from rest_framework import mixins, status, viewsets
+from core.models import Page, Tag, Post
+from core.serializers import (AddRemoveTagSerializer,
+                               AdminPageDetailSerializer, FollowerSerializer,
+                               FollowersListSerializer,
+                               ModerPageDetailSerializer, PageDetailSerializer,
+                               PageListSerializer, TagSerializer,
+                               UserPageDetailSerializer, HomeSerializer, 
+                               PostDetailSerializer, PostListSerializer)
+from core.services import (accept_all_follow_requests, accept_follow_request,
+                            add_tag_to_page, deny_all_follow_requests,
+                            deny_follow_request, follow_page,
+                            get_blocked_pages, get_page_follow_requests,
+                            get_page_followers, get_page_tags,
+                            get_permissions_list, get_unblocked_pages,
+                            remove_tag_from_page, unfollow_page,
+                            upload_page_image_to_s3, get_following_pages_posts, 
+                            get_liked_posts, get_page_name_and_followers_email_list, 
+                            get_posts, like_post, unlike_post)
+from core.message_broker import publish
+from rest_framework import mixins, status
 from rest_framework.decorators import action
+from rest_framework.filters import SearchFilter
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-
-from .models import Post
-from .serializers import PostModelSerializer
-
-from .permissions import *
-from .serializers import *
-from .services import (add_follow_requests_to_request_data, add_like_to_post,
-                       add_user_to_page_follow_requests,
-                       add_user_to_page_followers, foreign_page, user_is_able_to_see_the_post,
-                       user_is_in_page_follow_requests_or_followers)
-
-from django.db.models import Q
-from rest_framework import mixins, status, viewsets
-from rest_framework.decorators import action
-from rest_framework.response import Response
+from rest_framework.viewsets import GenericViewSet
+from user.permissions import IsAdminRole, IsBlockedUser, IsModerRole
+from user.services import get_presigned_url
+from .tasks import send_email_to_subscribers
 
 
+class PagesViewSet(
+    mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    mixins.ListModelMixin,
+    GenericViewSet,
+):
+    """
+    All pages by all users
+    List, retrieve (for all users)
+    Update (only for admins and moders)
+    Non-blocked pages display only for admins and moders
+    """
 
-class PageViewSet(viewsets.ModelViewSet):
-    """ViewSet for all Page objects"""
-    queryset = Page.objects.all()
-    permission_classes = []
-    permissions_dict = {
-        'partial_update': (permissions.IsAuthenticated, IsPageOwnerOrModeratorOrAdmin, PageIsntBlocked),
-        'update': (permissions.IsAuthenticated, IsPageOwnerOrModeratorOrAdmin, PageIsntBlocked),
-        'destroy': (permissions.IsAuthenticated, IsPageOwner),
-        'create': (permissions.IsAuthenticated,),
-        'list': (permissions.IsAuthenticated,),
-        'retrieve': (permissions.IsAuthenticated, PageIsPublicOrOwner, PageIsntBlocked),
-        'follow_requests': (permissions.IsAuthenticated, IsPageOwnerOrModeratorOrAdmin),
-        'followers': (permissions.IsAuthenticated, IsPageOwnerOrModeratorOrAdmin, PageIsntBlocked),
-        'follow': (permissions.IsAuthenticated, PageIsntBlocked),
-        'posts': (permissions.IsAuthenticated, PageIsntBlocked, PageIsPublicOrFollowerOrOwnerOrModeratorOrAdmin),
-        'image': (permissions.IsAuthenticated, IsPageOwnerOrModeratorOrAdmin,)
+    action_permission_classes = {
+        "list": (
+            IsAuthenticated,
+            ~IsBlockedUser,
+        ),
+        "retrieve": (
+            IsAuthenticated,
+            ~IsBlockedUser,
+        ),
+        "update": (
+            IsAuthenticated,
+            IsAdminRole | IsModerRole,
+        ),
+        "partial_update": (
+            IsAuthenticated,
+            IsAdminRole | IsModerRole,
+        ),
+        "blocked": (
+            IsAuthenticated,
+            IsAdminRole | IsModerRole,
+        ),
+        "followers": (IsAuthenticated, ~IsBlockedUser),
+        "follow": (IsAuthenticated, ~IsBlockedUser),
+        "unfollow": (IsAuthenticated, ~IsBlockedUser),
     }
 
-    # a method that set permissions depending on http request methods
-    def get_permissions(self):
-        if self.action in self.permissions_dict:
-            perms = self.permissions_dict[self.action]
-        else:
-            perms = []
-        return [permission() for permission in perms]
+    detail_serializer_classes = {
+        "admin": AdminPageDetailSerializer,
+        "moderator": ModerPageDetailSerializer,
+        "user": PageDetailSerializer,
+    }
 
-    def check_permissions(self, request):
-        try:
-            obj = Page.objects.get(id=self.kwargs.get('pk'))
-        except Page.DoesNotExist:  # exception when 'get' request on /pages/
-            return Response({'message': 'Not found'}, status.HTTP_404_NOT_FOUND)
-        else:
-            self.check_object_permissions(request, obj)
-        finally:
-            return super().check_permissions(request)
+    list_serializer_classes = {
+        "list": PageListSerializer,
+        "blocked": PageListSerializer,
+        "followers": FollowersListSerializer,
+    }
+
+    filter_backends = (SearchFilter,)
+    search_fields = (
+        "name",
+        "uuid",
+        "tags__name",
+    )
+
+    @action(detail=False, methods=["get"], url_path="blocked")
+    def blocked(self, request):
+        all_blocked_pages = get_blocked_pages()
+        serializer = self.get_serializer(all_blocked_pages, many=True)
+        return Response(data=serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="followers")
+    def followers(self, request, pk=None):
+        all_page_followers = get_page_followers(page_pk=pk)
+        serializer = self.get_serializer(all_page_followers, many=True)
+        return Response(data=serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="follow")
+    def follow(self, request, pk=None):
+        is_private, page_owner_id, is_follower = follow_page(user=self.request.user, page_pk=pk)
+        if not is_private:
+            if not is_follower:
+                data = {"method": "add", "user_id": page_owner_id, "value": "subscribers"}
+                publish(body=data)
+            return Response(
+                {"detail": "You have subscribed to the page or you are already a subscriber."},
+                status=status.HTTP_200_OK,
+            )
+        return Response(
+            {"detail": "You have applied for a subscription."},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], url_path="unfollow")
+    def unfollow(self, request, pk=None):
+        page_owner_id, is_follower = unfollow_page(user=self.request.user, page_pk=pk)
+        if is_follower:
+            data = {"method": "delete", "user_id": page_owner_id, "value": "subscribers"}
+            publish(body=data)
+        return Response(
+            {"detail": "You have unsubscribed from the page or have already unsubscribed."},
+            status=status.HTTP_200_OK,
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        image_s3_path = serializer.data["image_s3_path"]
+        if image_s3_path:
+            serialized_data = serializer.data
+            serialized_data["image_s3_path"] = get_presigned_url(key=image_s3_path)
+            return Response(serialized_data)
+        return Response(serializer.data)
+
+    def get_queryset(self):
+        if self.request.user.role in ("admin", "moderator"):
+            return Page.objects.all().order_by("id")
+        return get_unblocked_pages(is_owner_page=False)
 
     def get_serializer_class(self):
-        if self.action in ('followers', 'follow_requests', 'follow'):
-            self.serializer_class = PageModelFollowRequestsSerializer
-            return self.serializer_class
-        if self.request.user.role in (User.Roles.ADMIN, User.Roles.MODERATOR):
-            self.serializer_class = PageAdminOrModerSerializer
-        else:
-            self.serializer_class = PageUserSerializer
-        return self.serializer_class
+        if self.action in ("retrieve", "update", "partial_update", "follow", "unfollow"):
+            return self.detail_serializer_classes.get(self.request.user.role)
+        return self.list_serializer_classes.get(self.action)
 
-    @action(detail=True, methods=('get', 'post'))
-    def follow_requests(self, request, pk=None):
-        """
-        'GET' returns list of requests 'POST' updates list of requests (according to accepted or denied requests)
+    def get_permissions(self):
+        return get_permissions_list(self, permission_classes_dict=self.action_permission_classes)
 
-        Send one of 2 parameters: {"accept_ids": [0,1,2,3]} or {"deny_ids": [0,1,2,3]}
-        """
-        page = self.get_object()
-        response = None
-        self.check_permissions(request)
-        self.check_object_permissions(request, page)
-        if page.is_private:
-            if request.method == "GET":
-                serializer = PageModelFollowRequestsSerializer(page)
-                return Response({'follow_requests': serializer.data['follow_requests']}, status.HTTP_200_OK)
-            elif request.method == 'POST':
-                # there we're adding ids of already requested users
-                # that allow user write only new follow_requests in request.data
-                add_follow_requests_to_request_data(request.data, page.follow_requests)
-                serializer = PageModelFollowRequestsSerializer(data=request.data)
-                serializer.is_valid(raise_exception=True)
-                serializer.update(page, request.data)
-                response = Response({'message': 'Success!'}, status.HTTP_200_OK)
-        else:
-            response = Response({"message": "Your page isn't private"}, status.HTTP_400_BAD_REQUEST)
-        return response
 
-    @action(detail=True, methods=('get',))
+class CurrentUserPagesViewSet(
+    mixins.CreateModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
+    mixins.ListModelMixin,
+    GenericViewSet,
+):
+    """
+    Current user pages
+    Retrieve, create, update, delete page
+    """
+
+    permission_classes = (
+        IsAuthenticated,
+        ~IsBlockedUser,
+    )
+
+    serializer_classes = {
+        "list": PageListSerializer,
+        "create": PageListSerializer,
+        "page_follow_requests": FollowersListSerializer,
+        "all_follow_requests": FollowersListSerializer,
+        "followers": FollowersListSerializer,
+        "deny_follow_request": FollowerSerializer,
+        "accept_follow_request": FollowerSerializer,
+        "tags": TagSerializer,
+        "add_tag_to_page": AddRemoveTagSerializer,
+        "remove_tag_from_page": AddRemoveTagSerializer,
+    }
+
+    @action(detail=True, methods=["get"], url_path="followers")
     def followers(self, request, pk=None):
-        """
-        'GET' returns list of followers for chosen page
+        all_page_followers = get_page_followers(page_pk=pk)
+        serializer = self.get_serializer(all_page_followers, many=True)
+        serializer.is_valid(raise_exception=True)
+        return Response(data=serializer.data, status=status.HTTP_200_OK)
 
-        No parameters there
-        """
-        page = self.get_object()
-        self.check_permissions(request)
-        self.check_object_permissions(request, page)
-        serializer = PageModelFollowRequestsSerializer(page)
-        return Response({'followers': serializer.data['followers']}, status.HTTP_200_OK)
+    @action(detail=True, methods=["get"], url_path="follow-requests")
+    def page_follow_requests(self, request, pk=None):
+        page_follow_requests = get_page_follow_requests(page_pk=pk)
+        serializer = self.get_serializer(page_follow_requests, many=True)
+        serializer.is_valid(raise_exception=True)
+        return Response(data=serializer.data, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=('post',))
-    def follow(self, request, pk=None):
-        """
-        'POST' following or sending a follow_request
+    @action(detail=True, methods=["post"], url_path="accept")
+    def accept_follow_request(self, request, pk=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+        is_follow_request = accept_follow_request(follower_email=email, page_pk=pk)
+        if is_follow_request:
+            data = {"method": "add", "user_id": self.request.user.pk, "value": "subscribers"}
+            publish(body=data)
+        return Response(
+            {"detail": "You have successfully accepted user to followers or user is already your follower."},
+            status=status.HTTP_200_OK,
+        )
 
-        No data required there. Just send {}
-        """
-        # 'post' adding current user to the list of request of followers(in case of public page)
-        page = self.get_object()
-        self.check_permissions(request)
-        self.check_object_permissions(request, self.get_object())
-        # 'already sent' case
-        if user_is_in_page_follow_requests_or_followers(request.user, page):
-            return Response({"message": "You are already sent follow request"}, status.HTTP_400_BAD_REQUEST)
-        # 'new follow_request' case
-        if page.is_private:
-            add_user_to_page_follow_requests(request.user, page)
-            page.save()
-            return Response({'message': 'Your follow request successfully sent!'}, status.HTTP_200_OK)
-        # public page case
-        add_user_to_page_followers(request.user, page)
-        page.save()
-        return Response({'message': 'Successfully followed!'}, status.HTTP_200_OK)
+    @action(detail=True, methods=["post"], url_path="deny")
+    def deny_follow_request(self, request, pk=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+        deny_follow_request(follower_email=email, page_pk=pk)
+        return Response(
+            {"detail": "You have successfully removed user from followers or user is already removed."},
+            status=status.HTTP_200_OK,
+        )
 
-    @action(detail=True, methods=('get',))
-    def posts(self, request, pk=None):
-        """
-        'GET' returns list of posts for chosen page
+    @action(detail=True, methods=["post"], url_path="accept-all")
+    def accept_all_follow_requests(self, request, pk=None):
+        follow_requests_number = accept_all_follow_requests(page_pk=pk)
+        if follow_requests_number > 0:
+            data = {
+                "method": "add",
+                "user_id": self.request.user.pk,
+                "requests": follow_requests_number,
+                "many": True,
+                "value": "subscribers"
+            }
+            publish(body=data)
+        return Response({"detail": "You have successfully accepted all follow requests."}, status=status.HTTP_200_OK)
 
-        No parameters there
-        """
-        page = self.get_object()
-        self.check_permissions(request)
-        self.check_object_permissions(request, page)
-        query = Post.objects.filter(page=page)
-        post_serializer = PostModelSerializer(query, many=True)
-        return Response({'posts': post_serializer.data}, status.HTTP_200_OK)
+    @action(detail=True, methods=["post"], url_path="deny-all")
+    def deny_all_follow_requests(self, request, pk=None):
+        deny_all_follow_requests(page_pk=pk)
+        return Response({"detail": "You have successfully denied all follow requests."}, status=status.HTTP_200_OK)
 
-    
-class TagViewSet(viewsets.GenericViewSet, mixins.CreateModelMixin, mixins.DestroyModelMixin, mixins.RetrieveModelMixin,
-                 mixins.ListModelMixin):
-    """ViewSet for all Tag objects"""
+    @action(detail=True, methods=["get"], url_path="tags")
+    def tags(self, request, pk=None):
+        page_tags = get_page_tags(page_pk=pk)
+        serializer = self.get_serializer(page_tags, many=True)
+        serializer.is_valid(raise_exception=True)
+        return Response(data=serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="add-tag")
+    def add_tag_to_page(self, request, pk=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        tag_name = serializer.validated_data["name"]
+        add_tag_to_page(tag_name=tag_name, page_pk=pk)
+        return Response(
+            {"detail": "You have successfully added tag to page or it's already added."}, status=status.HTTP_200_OK
+        )
+
+    @action(detail=True, methods=["delete"], url_path="remove-tag")
+    def remove_tag_from_page(self, request, pk=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        tag_name = serializer.validated_data["name"]
+        remove_tag_from_page(tag_name=tag_name, page_pk=pk)
+        return Response(
+            {"detail": "You have successfully removed tag from page or it's already removed."},
+            status=status.HTTP_200_OK,
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        image_s3_path = serializer.data["image_s3_path"]
+        if image_s3_path:
+            serialized_data = serializer.data
+            serialized_data["image_s3_path"] = get_presigned_url(key=image_s3_path)
+            return Response(serialized_data)
+        return Response(serializer.data)
+
+    def perform_update(self, serializer):
+        image_s3_path = serializer.validated_data["image_s3_path"]
+        page_id = serializer.data["id"]
+        serializer.validated_data["image_s3_path"] = upload_page_image_to_s3(file_path=image_s3_path, page_id=page_id)
+
+    def perform_create(self, serializer):
+        serializer.save()
+        data = {"method": "add", "user_id": self.request.user.pk, "value": "pages"}
+        publish(body=data)
+
+    def perform_destroy(self, instance, **kwargs):
+        instance.delete()
+        data = {"method": "delete", "user_id": self.request.user.pk, "value": "pages"}
+        publish(body=data)
+
+    def get_queryset(self):
+        return get_unblocked_pages(is_owner_page=True, owner=self.request.user)
+
+    def get_serializer_class(self):
+        return self.serializer_classes.get(self.action, UserPageDetailSerializer)
+
+
+class TagsViewSet(
+    mixins.CreateModelMixin,
+    mixins.DestroyModelMixin,
+    mixins.ListModelMixin,
+    GenericViewSet,
+):
+    """Tags"""
+
     queryset = Tag.objects.all()
-    serializer_class = TagModelSerializer
-    permission_classes = ()
-    permissions_dict = {
-        'destroy': (permissions.IsAuthenticated, IsAdminOrModerator),
-        'create': (permissions.IsAuthenticated, IsAdminOrModerator),
-        'list': (permissions.IsAuthenticated,),
-        'retrieve': (permissions.IsAuthenticated,),
+    serializer_class = TagSerializer
+    permission_classes = (IsAuthenticated, ~IsBlockedUser)
+
+    action_permission_classes = {
+        "list": (
+            IsAuthenticated,
+            ~IsBlockedUser,
+        ),
+        "create": (
+            IsAuthenticated,
+            ~IsBlockedUser,
+        ),
+        "destroy": (
+            IsAuthenticated,
+            ~IsBlockedUser,
+            IsAdminRole | IsModerRole,
+        ),
     }
 
-    # a method that set permissions depending on http request methods
     def get_permissions(self):
-        if self.action in self.permissions_dict:
-            perms = self.permissions_dict[self.action]
-        else:
-            perms = []
-        return [permission() for permission in perms]
+        return get_permissions_list(self, permission_classes_dict=self.action_permission_classes)
 
 
-class SearchPageViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
-    serializer_class = PageUserSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    queryset = Page.objects.all()
-    filter_backends = (django_filters.rest_framework.DjangoFilterBackend,)
-    filterset_fields = ('name', 'uuid', 'tags')
+class PostsViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.DestroyModelMixin, GenericViewSet):
+    """
+    All posts from all pages
+    Only for admins and moderators
+    """
+
+    queryset = Post.objects.all().order_by("id")
+    permission_classes = (
+        IsAuthenticated,
+        ~IsBlockedUser,
+        IsAdminRole | IsModerRole,
+    )
+    serializer_class = PostListSerializer
+
+    def perform_destroy(self, instance):
+        instance.delete()
+        data = {"method": "delete", "value": "posts"}
+        publish(body=data)
 
 
+class UserPostsViewSet(
+    mixins.CreateModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
+    mixins.ListModelMixin,
+    GenericViewSet,
+):
+    """Certain user posts"""
 
-class PostViewSet(viewsets.ModelViewSet):
-    serializer_class = PostModelSerializer
-    permission_classes = ()
-    queryset = Post.objects.all()
-    permissions_dict = {
-        'list': (permissions.IsAuthenticated,),  # also got some permit checks in get_query
-        'create': (permissions.IsAuthenticated,),  # overloaded below
-        'partial_update': (permissions.IsAuthenticated, IsPageOwnerOrModeratorOrAdmin, PageIsntBlocked),
-        'update': (permissions.IsAuthenticated, IsPageOwnerOrModeratorOrAdmin, PageIsntBlocked),
-        'destroy': (permissions.IsAuthenticated, IsPageOwnerOrModeratorOrAdmin),
-        'retrieve': (permissions.IsAuthenticated, PageIsPublicOrFollowerOrOwnerOrModeratorOrAdmin, PageIsntBlocked),
-        'like': (permissions.IsAuthenticated, PageIsPublicOrFollowerOrOwnerOrModeratorOrAdmin, PageIsntBlocked)
-    }
-
-    # a method that set permissions depending on http request methods
-    def get_permissions(self):
-        if self.action in self.permissions_dict:
-            perms = self.permissions_dict[self.action]
-        else:
-            perms = []
-        return [permission() for permission in perms]
-
-    def check_permissions(self, request):
-        """
-        Checking all the permissions according to the parent Page
-        """
-        if self.kwargs.get('pk', False):
-            post = self.get_object()
-            parent_page = Page.objects.get(id=post.page.id)
-            self.check_object_permissions(request, parent_page)
-        return super().check_permissions(request)
-
-    def get_object(self):
-        return Post.objects.get(pk=self.kwargs['pk'])
+    permission_classes = (
+        IsAuthenticated,
+        ~IsBlockedUser,
+    )
 
     def get_queryset(self):
-        query = Post.objects.select_related('page').all()
-        if self.action == 'list':
-            return [post for post in query if user_is_able_to_see_the_post(self.request.user, post)]
-        return query
+        return get_posts(is_owner_posts=True, owner=self.request.user)
 
-    @action(detail=True, methods=('post',))
-    def like(self, request, *args, **kwargs):
-        """
-        'POST' likes chosen post with one of your pages
+    def get_serializer_class(self):
+        if self.action in ("retrieve", "update", "partial_update"):
+            return PostDetailSerializer
+        return PostListSerializer
 
-        Send 1 parameter: {"page_id": _ }
-        """
-        page_id = request.data.get('page_id', None)
-        if not page_id:
-            return Response({'message': 'You need to send {"page_id": _ } parameter'}, status.HTTP_406_NOT_ACCEPTABLE)
-        if foreign_page(request.user, page_id):
-            return Response({'message': 'You cant like from another users pages! '}, status.HTTP_406_NOT_ACCEPTABLE)
-        post = self.get_object()
-        self.check_permissions(request)
-        add_like_to_post(page_id, post)
-        return Response({'message': 'Successfully liked!'}, status.HTTP_200_OK)
+    def perform_create(self, serializer):
+        serializer.save()
+        data = {"method": "add", "user_id": self.request.user.pk, "value": "posts"}
+        publish(body=data)
+        data.update(serializer.data)
+        page_name_and_follower_emails = get_page_name_and_followers_email_list(page_pk=self.request.data["page"][0])
+        send_email_to_subscribers.delay(
+            page=page_name_and_follower_emails[0], follower_list=page_name_and_follower_emails[1]
+        )
+
+    def perform_destroy(self, instance, **kwargs):
+        instance.delete()
+        data = {"method": "delete", "user_id": self.request.user.pk, "value": "posts"}
+        publish(body=data)
 
 
-class FeedViewSet(viewsets.GenericViewSet, mixins.ListModelMixin):
-    serializer_class = PostModelSerializer
-    permission_classes = (permissions.IsAuthenticated,)
+class HomeViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, GenericViewSet):
+    """Feed with posts"""
+
+    serializer_class = HomeSerializer
+    permission_classes = (
+        IsAuthenticated,
+        ~IsBlockedUser,
+    )
+
+    @action(detail=True, methods=["post"], url_path="like")
+    def like(self, request, pk=None):
+        is_liked, post_owner = like_post(user=self.request.user, post_pk=pk)
+        if not is_liked:
+            data = {"method": "add", "user_id": post_owner, "value": "likes"}
+            publish(body=data)
+        return Response({"detail": "You have liked this post."})
+
+    @action(detail=True, methods=["post"], url_path="unlike")
+    def unlike(self, request, pk=None):
+        is_liked, post_owner = unlike_post(user=self.request.user, post_pk=pk)
+        if is_liked:
+            data = {"method": "delete_like", "user_id": post_owner, "value": "likes"}
+            publish(body=data)
+        return Response({"detail": "You have unliked this post."})
+
+    @action(detail=False, methods=["get"], url_path="liked")
+    def liked(self, request, pk=None):
+        liked_posts = get_liked_posts(user=self.request.user)
+        serializer = self.get_serializer(liked_posts, many=True)
+        serializer.is_valid(raise_exception=True)
+        return Response(data=serializer.data, status=status.HTTP_200_OK)
 
     def get_queryset(self):
-        queryset = (Post.objects.prefetch_related('page__followers').filter(
-            Q(page__followers=self.request.user) |
-            Q(page__owner=self.request.user)).distinct())
-        return queryset
+        return get_following_pages_posts(user=self.request.user)

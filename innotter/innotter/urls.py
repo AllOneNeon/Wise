@@ -15,20 +15,17 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import include, path
+from core.urls import router as pages_router
+from core.urls import router as posts_router
+from rest_framework import routers
+from user.urls import router as users_router
 
-from core.views import SearchPageViewSet, FeedViewSet
-from user.views import CreateTokenView, RefreshTokenView, SearchUserViewSet
+router = routers.DefaultRouter()
+router.registry.extend(pages_router.registry)
+router.registry.extend(posts_router.registry)
+router.registry.extend(users_router.registry)
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('api/v1/user/', include('user.urls')),
-    path('api/v1/page/', include('core.urls')),
-    path('api/v1/post/', include('core.urls')),
-    path('api/v1/feed/', FeedViewSet.as_view({'get': 'list'}), name='feed'),
-    path('api/v1/search/user/', SearchUserViewSet.as_view({'get': 'list'}), name='search-user'),
-    path('api/v1/search/page/', SearchPageViewSet.as_view({'get': 'list'}), name='search-page'),
-
-    # JWT token urls
-    path('api/v1/token/create/', CreateTokenView.as_view(), name='token_create'),
-    path('api/v1/token/refresh/', RefreshTokenView.as_view(), name='token_refresh'),
+    path("admin/", admin.site.urls),
+    path("api/v1/", include(router.urls)),
 ]

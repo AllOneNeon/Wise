@@ -1,13 +1,10 @@
 from django.contrib import admin
-
-from .models import User
+from user.models import User
 
 
 class UserAdmin(admin.ModelAdmin):
-    list_display = ('username', 'email', 'role', 'is_blocked')
-    search_fields = ('email', 'username')
-    list_editable = ('is_blocked',)
-    list_filter = ('role',)
+    list_display = ("id", "username", "title", "email", "role", "is_blocked")
+    list_display_links = ("id", "username")
 
 
 admin.site.register(User, UserAdmin)

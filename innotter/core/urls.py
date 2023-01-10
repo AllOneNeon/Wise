@@ -1,9 +1,17 @@
-from rest_framework.routers import DefaultRouter
-from .views import *
+from django.urls import include, path
+from core.views import (CurrentUserPagesViewSet, PagesViewSet, TagsViewSet,
+                         HomeViewSet, PostsViewSet, UserPostsViewSet)
+from rest_framework import routers
 
-router = DefaultRouter()
-router.register(r'tag', TagViewSet, basename='tag')
-router.register(r'', PageViewSet, basename='page')
-router.register(r'', PostViewSet, basename='post')
-urlpatterns = router.urls
+router = routers.DefaultRouter()
+router.register(r"pages", PagesViewSet, basename="pages")
+router.register(r"my-pages", CurrentUserPagesViewSet, basename="my-pages")
+router.register(r"tags", TagsViewSet, basename="tags")
 
+router.register(r"posts", PostsViewSet, basename="posts")
+router.register(r"my-posts", UserPostsViewSet, basename="my-posts")
+router.register(r"home", HomeViewSet, basename="home")
+
+urlpatterns = [
+    path("", include(router.urls)),
+]
