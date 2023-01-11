@@ -1,26 +1,42 @@
 from rest_framework import permissions
+from user.models import User
 
-from .models import User
 
+class IsAdminRole(permissions.BasePermission):
+    """Checks if the user role is admin"""
 
-class IsUserOwner(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
-        return obj == request.user
+        return request.user.role == User.Roles.ADMIN
 
-
-class IsAdmin(permissions.BasePermission):
     def has_permission(self, request, view):
-        if request.user.role:
-            return request.user.role == User.Roles.ADMIN
-        return False
+        return request.user.role == User.Roles.ADMIN
 
 
-class IsModerator(permissions.BasePermission):
+class IsModerRole(permissions.BasePermission):
+    """Checks if the user role is moderator"""
+
+    def has_object_permission(self, request, view, obj):
+        return request.user.role == User.Roles.MODERATOR
+
     def has_permission(self, request, view):
         return request.user.role == User.Roles.MODERATOR
 
 
-class IsUserOwnerOrAdmin(permissions.BasePermission):
+class IsUserRole(permissions.BasePermission):
+    """Checks if the user role is user"""
+
     def has_object_permission(self, request, view, obj):
-        return IsAdmin.has_permission(self, request, view)\
-               or IsUserOwner.has_object_permission(self, request, view, obj)
+        return request.user.role == User.Roles.USER
+
+    def has_permission(self, request, view):
+        return request.user.role == User.Roles.USER
+
+
+class IsBlockedUser(permissions.BasePermission):
+    """Checks if the user is blocked"""
+
+    def has_object_permission(self, request, view, obj):
+        return request.user.is_blocked
+
+    def has_permission(self, request, view):
+        return request.user.is_blocked

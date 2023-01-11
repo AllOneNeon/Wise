@@ -55,6 +55,12 @@ markdown = "*"
 routers = "*"
 psycopg2-binary = "*"
 datetime = "*"
+filters-django = "*"
+pika = "*"
+boto3 = "*"
+pytest = "*"
+fastapi = "*"
+aio-pika = "*"
 
 [dev-packages]
 

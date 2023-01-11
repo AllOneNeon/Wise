@@ -1,16 +1,16 @@
-from django.urls import path
-from .views import RegistrationAPIView, LoginAPIView, UserUpdateAPIView, UserModelViewSet
-from rest_framework.routers import DefaultRouter
+from django.urls import include, path
+from rest_framework import routers
+from user.views import (RefreshLoginViewSet, UserLoginViewSet,
+                         UserProfileViewSet, UserRegistrationViewSet,
+                         UserViewSet)
 
-
-app_name = 'auth'
-router = DefaultRouter()
-router.register(r'', UserModelViewSet, basename='users')
+router = routers.DefaultRouter()
+router.register(r"users", UserViewSet, basename="users")
+router.register(r"profile", UserProfileViewSet, basename="profile")
+router.register(r"registration", UserRegistrationViewSet, basename="registration")
+router.register(r"login", UserLoginViewSet, basename="login")
+router.register(r"refresh", RefreshLoginViewSet, basename="refresh")
 
 urlpatterns = [
-    path('registration/', RegistrationAPIView.as_view()),
-    path('login/', LoginAPIView.as_view()),
-    path('user-update/', UserUpdateAPIView.as_view()),
+    path("", include(router.urls)),
 ]
-
-urlpatterns += router.urls

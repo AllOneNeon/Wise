@@ -1,69 +1,123 @@
-from rest_framework import status, viewsets, filters
-from rest_framework.generics import RetrieveUpdateAPIView
-from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
+from core.message_broker import publish
+from rest_framework import mixins, status
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.views import APIView
-from .serializers import  UserSerializer#, LoginSerializer, RegistrationSerializer,
-from .models import User
-from .permissions import *
+from rest_framework.viewsets import GenericViewSet
+from user.models import User
+from user.permissions import IsAdminRole, IsBlockedUser
+from user.serializers import (UserDetailSerializer, UserListSerializer,
+                               UserLoginSerializer, UserProfileSerializer,
+                               UserRefreshSerializer,
+                               UserRegistrationSerializer)
+from user.services import (block_or_unblock_all_pages, get_presigned_url,
+                            set_access_to_admin_panel, upload_user_image_to_s3)
 
-class UserViewSet(viewsets.ModelViewSet):
-    """ViewSet for all User objects"""
+
+class UserViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin, mixins.ListModelMixin, GenericViewSet):
+    """
+    Users viewset
+    Only for admin
+    """
+
+    queryset = User.objects.all().order_by("id")
+    permission_classes = (
+        IsAuthenticated,
+        IsAdminRole,
+    )
+
+    def get_serializer_class(self):
+        if self.action in ("retrieve", "update", "partial_update", "get_user_profile"):
+            return UserDetailSerializer
+        return UserListSerializer
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        image_s3_key = serializer.data["image_s3_path"]
+        if image_s3_key:
+            serialized_data = serializer.data
+            serialized_data["image_s3_path"] = get_presigned_url(key=image_s3_key)
+            return Response(serialized_data)
+        return Response(serializer.data)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        if "is_blocked" in request.data:
+            block_or_unblock_all_pages(user=instance)
+        elif "role" in request.data:
+            set_access_to_admin_panel(user=instance)
+        return Response(serializer.data)
+
+
+class UserProfileViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin, mixins.ListModelMixin, GenericViewSet):
+    """
+    Users profile viewset
+    """
+
+    permission_classes = (IsAuthenticated, ~IsBlockedUser)
+    serializer_class = UserProfileSerializer
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        image_s3_key = serializer.data["image_s3_path"]
+        if image_s3_key:
+            serialized_data = serializer.data
+            serialized_data["image_s3_path"] = get_presigned_url(key=image_s3_key)
+            return Response(serialized_data)
+        return Response(serializer.data)
+
+    def perform_update(self, serializer):
+        image_s3_path = serializer.validated_data["image_s3_path"]
+        serializer.validated_data["image_s3_path"] = upload_user_image_to_s3(
+            file_path=image_s3_path, user=self.request.user
+        )
+
+    def get_queryset(self):
+        return User.objects.filter(username=self.request.user)
+
+
+class UserRegistrationViewSet(mixins.CreateModelMixin, GenericViewSet):
+    """
+    User registration view set (creating new account)
+    """
+
     queryset = User.objects.all()
-    serializer_class = UserSerializer
-    permission_classes = []
-    permissions_dict = {
-        'partial_update': (permissions.IsAuthenticated, IsUserOwnerOrAdmin),
-        'update': (permissions.IsAuthenticated, IsUserOwnerOrAdmin),
-        'destroy': (permissions.IsAuthenticated, IsUserOwnerOrAdmin),
-        'create': (permissions.AllowAny,),
-        'list': (permissions.IsAuthenticated, IsAdmin,),
-        'retrieve': (permissions.IsAuthenticated,),
-    }
+    serializer_class = UserRegistrationSerializer
+    permission_classes = (AllowAny,)
 
-# переделать на viewset
-# class RegistrationAPIView(APIView):
-#     permission_classes = (AllowAny,)
-#     serializer_class = RegistrationSerializer
+    def perform_create(self, serializer):
+        serializer.save()
+        data = {"method": "new_user", "id": serializer.data["id"]}
+        publish(body=data)
 
-#     def post(self, request):
-#         user = request.data
-#         serializer = self.serializer_class(data=user)
-#         serializer.is_valid(raise_exception=True)
-#         serializer.save()
-#         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-# class LoginAPIView(APIView):
-#     permission_classes = (AllowAny,)
-#     serializer_class = LoginSerializer
+class UserLoginViewSet(mixins.CreateModelMixin, GenericViewSet):
+    """
+    User login viewset (getting access and refresh token)
+    """
 
-#     def post(self, request):
-#         user = request.data
-#         serializer = self.serializer_class(data=user)
-#         serializer.is_valid(raise_exception=True)
-#         return Response(serializer.data, status=status.HTTP_200_OK)
+    serializer_class = UserLoginSerializer
+    queryset = User.objects.all()
+    permission_classes = (AllowAny,)
 
-# class UserUpdateAPIView(RetrieveUpdateAPIView):
-#     permission_classes = (IsAuthenticated,)
-#     serializer_class = UserSerializer
 
-#     def retrieve(self, request, *args, **kwargs):
-#         serializer = self.serializer_class(request.user)
-#         return Response(serializer.data, status=status.HTTP_200_OK)
+class RefreshLoginViewSet(mixins.CreateModelMixin, GenericViewSet):
+    """
+    User refresh viewset (refreshing token)
+    """
 
-#     def update(self, request, *args, **kwargs):
-#         serializer_data = request.data
-#         serializer = self.serializer_class(
-#             request.user, data=serializer_data, partial=True
-#         )
-#         serializer.is_valid(raise_exception=True)
-#         serializer.save()
-#         return Response(serializer.data, status=status.HTTP_200_OK)
+    queryset = User.objects.all()
+    serializer_class = UserRefreshSerializer
+    permission_classes = (AllowAny,)
 
-# class UserModelViewSet(viewsets.ModelViewSet):
-#     queryset = User.objects.all()
-#     serializer_class = UserSerializer
-#     permission_classes = (IsAuthenticatedOrReadOnly,)
-#     filter_backends = [filters.SearchFilter]
-#     search_fields = ['username', 'email', ]
-
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_202_ACCEPTED, headers=headers)

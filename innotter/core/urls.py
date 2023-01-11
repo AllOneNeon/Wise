@@ -1,12 +1,17 @@
-from .views import PageModelViewSet, PostLikeModelViewSet, PostModelViewSet, SubscriberModelViewSet
-from rest_framework.routers import DefaultRouter
+from django.urls import include, path
+from core.views import (CurrentUserPagesViewSet, PagesViewSet, TagsViewSet,
+                         HomeViewSet, PostsViewSet, UserPostsViewSet)
+from rest_framework import routers
 
+router = routers.DefaultRouter()
+router.register(r"pages", PagesViewSet, basename="pages")
+router.register(r"my-pages", CurrentUserPagesViewSet, basename="my-pages")
+router.register(r"tags", TagsViewSet, basename="tags")
 
-app_name = 'core'
+router.register(r"posts", PostsViewSet, basename="posts")
+router.register(r"my-posts", UserPostsViewSet, basename="my-posts")
+router.register(r"home", HomeViewSet, basename="home")
 
-router = DefaultRouter()
-router.register(r'', PageModelViewSet, basename='pages')
-router.register(r'posts', PostModelViewSet, basename='posts')
-router.register(r'likes', PostLikeModelViewSet, basename='likes')
-router.register(r'', SubscriberModelViewSet, basename='subscribers')
-urlpatterns = router.urls
+urlpatterns = [
+    path("", include(router.urls)),
+]

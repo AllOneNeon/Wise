@@ -1,0 +1,169 @@
+from .models import Post
+from django.db.models import Q
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from core.models import Page, Tag, Post
+from core.tasks import upload_file_to_s3
+from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.response import Response
+from user.models import User
+from user.services import (generate_file_name, get_presigned_url,
+                            is_allowed_file_extension)
+
+
+def get_permissions_list(self, permission_classes_dict: dict) -> list:
+    permission_classes = permission_classes_dict.get(self.action, list())
+    return [permission() for permission in permission_classes]
+
+
+def get_unblocked_pages(is_owner_page: bool, owner=None) -> Page:
+    pages = Page.objects.filter(
+        Q(is_blocked=False),
+        Q(unblock_date__isnull=True) | Q(unblock_date__lt=timezone.now()),
+    ).order_by("id")
+    if is_owner_page:
+        pages = pages.filter(owner=owner)
+    return pages
+
+
+def get_blocked_pages() -> Page:
+    return Page.objects.filter(is_blocked=True).order_by("id")
+
+
+def get_page_followers(page_pk: int) -> Page:
+    return get_object_or_404(Page, pk=page_pk).followers.all().order_by("id")
+
+
+def get_page_follow_requests(page_pk: int) -> Response:
+    return get_object_or_404(Page, pk=page_pk).follow_requests.all().order_by("id")
+
+
+def follow_page(user: User, page_pk: int) -> tuple:
+    page = get_object_or_404(Page, pk=page_pk)
+    is_user_follower = page.followers.contains(user)
+    if page.is_private:
+        page.follow_requests.add(user)
+        return True, page.owner.pk, page.followers.contains(user)
+    page.followers.add(user)
+    return False, page.owner.pk, is_user_follower
+
+
+def unfollow_page(user: User, page_pk: int) -> tuple:
+    page = get_object_or_404(Page, pk=page_pk)
+    is_user_follower = page.followers.contains(user)
+    page.followers.remove(user)
+    return page.owner.pk, is_user_follower
+
+
+def accept_follow_request(follower_email: str, page_pk: int) -> bool:
+    page = get_object_or_404(Page, pk=page_pk)
+    potential_follower = get_object_or_404(User, email=follower_email)
+    is_follow_request = page.follow_requests.contains(potential_follower)
+    page.followers.add(potential_follower)
+    page.follow_requests.remove(potential_follower)
+    return is_follow_request
+
+
+def deny_follow_request(follower_email: str, page_pk: int) -> None:
+    page = get_object_or_404(Page, pk=page_pk)
+    potential_follower = get_object_or_404(User, email=follower_email)
+    page.follow_requests.remove(potential_follower)
+
+
+def accept_all_follow_requests(page_pk: int) -> int:
+    page = get_object_or_404(Page, pk=page_pk)
+    follow_requests = page.follow_requests.all()
+    follow_requests_number = 0
+    if follow_requests:
+        for potential_follower in follow_requests:
+            follow_requests_number += 1
+            page.followers.add(potential_follower)
+            page.follow_requests.remove(potential_follower)
+    return follow_requests_number
+
+
+def deny_all_follow_requests(page_pk: int) -> None:
+    page = get_object_or_404(Page, pk=page_pk)
+    follow_requests = page.follow_requests.all()
+    if follow_requests:
+        for potential_follower in follow_requests:
+            page.follow_requests.remove(potential_follower)
+
+
+def get_page_tags(page_pk: int) -> Tag:
+    page = get_object_or_404(Page, pk=page_pk)
+    return page.tags.all()
+
+
+def add_tag_to_page(tag_name: str, page_pk: int) -> None:
+    page = get_object_or_404(Page, pk=page_pk)
+    tag = get_object_or_404(Tag, name=tag_name)
+    page.tags.add(tag)
+
+
+def remove_tag_from_page(tag_name: str, page_pk: int) -> None:
+    page = get_object_or_404(Page, pk=page_pk)
+    tag = get_object_or_404(Tag, name=tag_name)
+    page.tags.remove(tag)
+
+
+def upload_page_image_to_s3(file_path: str, page_id: Page) -> str:
+    if not is_allowed_file_extension(file_path=file_path):
+        error_msg = "Files with this extension are not allowed."
+        raise ValidationError(error_msg)
+
+    page = get_object_or_404(Page, pk=page_id)
+    key = generate_file_name(file_path=file_path, key=page.uuid, is_user_image=False)
+
+    page.image_s3_path = key
+    page.save()
+
+    try:
+        upload_file_to_s3.delay(file_path=file_path, key=key)
+    except FileNotFoundError:
+        error_msg = f"No such file or directory: {file_path}"
+        raise NotFound(error_msg)
+
+    presigned_url = get_presigned_url(key=key)
+
+    return presigned_url
+
+
+def get_posts(is_owner_posts: bool, owner=None) -> Post:
+    pages = Page.objects.filter(Q(is_blocked=False), Q(unblock_date__isnull=True) | Q(unblock_date__lt=timezone.now()))
+
+    if is_owner_posts:
+        pages = pages.filter(owner=owner)
+
+    return Post.objects.filter(page__in=pages).order_by("id")
+
+
+def get_following_pages_posts(user: User) -> Post:
+    pages = Page.objects.filter(Q(followers=user) | Q(owner=user)).distinct()
+    return Post.objects.filter(page__in=pages).order_by("-created_at")
+
+
+def get_liked_posts(user: User) -> Post:
+    return Post.objects.filter(likers=user).order_by("created_at")
+
+
+def like_post(user: User, post_pk: int) -> tuple:
+    post = get_object_or_404(Post, pk=post_pk)
+    post_owner = post.page.owner.pk
+    is_liked = post.likers.contains(user)
+    post.likers.add(user)
+    return is_liked, post_owner
+
+
+def unlike_post(user: User, post_pk: int) -> tuple:
+    post = get_object_or_404(Post, pk=post_pk)
+    post_owner = post.page.owner.pk
+    is_liked = post.likers.contains(user)
+    post.likers.remove(user)
+    return is_liked, post_owner
+
+
+def get_page_name_and_followers_email_list(page_pk: int) -> (list, str):
+    page = get_object_or_404(Page, pk=page_pk)
+    page_followers = page.followers.filter(is_blocked=False)
+    return page.name, [follower.email for follower in page_followers]

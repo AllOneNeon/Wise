@@ -14,7 +14,10 @@ from datetime import timedelta
 import os
 from pathlib import Path
 
+from dotenv import dotenv_values
+
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
+config = dotenv_values("/usr/src/app/.env")
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -39,8 +42,9 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-
+    
     'rest_framework',
+    'django_filters',
 
     'user',
     'core',
@@ -52,9 +56,10 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'innotter.middleware_jwt.JWTAuthenticationMiddleware', # custom middleware
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'innotter.middleware_jwt.JWTAuthenticationMiddleware',
+    
 ]
 
 ROOT_URLCONF = 'innotter.urls'
@@ -62,7 +67,7 @@ ROOT_URLCONF = 'innotter.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -138,47 +143,86 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 AUTH_USER_MODEL = 'user.User'
 
+JWT_SECRET = os.getenv("JWT_SECRET")
+JWT_ACCESS_TTL = 60 * 24 * 7
+JWT_REFRESH_TTL = 60 * 24 * 7 * 4
+
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        'user.jwt_auth.JWTAuthentication',
-        ),
-    'DEFAULT_PERMISSION_CLASSES': (
-        'rest_framework.permissions.IsAdminUser',
-        'rest_framework.permissions.AllowAny',
-        'rest_framework.permissions.IsAuthenticated',
-    )
+    "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    "DEFAULT_AUTHENTICATION_CLASSES": ("users.backends.JWTAuthentication",),
 }
 
 
-CUSTOM_JWT = {
-  'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
-  'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
-  'REFRESH_TOKEN_LIFETIME_MODEL': 30,
-  'ROTATE_REFRESH_TOKENS': False,
-  'BLACKLIST_AFTER_ROTATION': True,
-  'UPDATE_LAST_LOGIN': False,
-  'ALGORITHM': 'HS256',
-  'SIGNING_KEY': SECRET_KEY,
-  'VERIFYING_KEY': None,
-  'AUDIENCE': None,
-  'ISSUER': None,
-  'AUTH_HEADER_TYPES': ('Bearer',),
-  'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
-  'USER_ID_FIELD': 'id',
-  'USER_ID_CLAIM': 'user_id',
-  'USER_AUTHENTICATION_RULE': 'rest_framework_simplejwt.authentication.default_user_authentication_rule',
-  'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
-  'TOKEN_TYPE_CLAIM': 'token_type',
-  'JTI_CLAIM': 'jti',
-  'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
-  'SLIDING_TOKEN_LIFETIME': timedelta(minutes=10),
-  'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
+# REST_FRAMEWORK = {
+#     'DEFAULT_PERMISSION_CLASSES': [
+#         # 'rest_framework.permissions.AllowAny',
+#     ],
+#     'DEFAULT_AUTHENTICATION_CLASSES': (
 
-  'AUTH_COOKIE': 'access_token',  # Cookie name. Enables cookies if value is set# .
-  'AUTH_COOKIE_REFRESH': 'refresh_token',
-  'AUTH_COOKIE_DOMAIN': None,     # A string like "example.com", or None for standard domain cookie.
-  'AUTH_COOKIE_SECURE': False,    # Whether the auth cookies should be secure (https:// only).
-  'AUTH_COOKIE_HTTP_ONLY': True, # Http only cookie flag.It's not fetch by javascript.
-  'AUTH_COOKIE_PATH': '/',        # The path of the auth cookie.
-  'AUTH_COOKIE_SAMESITE': 'Lax',  # Whether to set the flag restricting cookie leaks on cross-site requests. This can be 'Lax', 'Strict', or None to disable the flag.
+#     ),
+#     'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend']
+# }
+
+# CUSTOM_JWT = {
+#   'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
+#   'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+#   'REFRESH_TOKEN_LIFETIME_MODEL': 30,  # in days
+#   'ROTATE_REFRESH_TOKENS': False,
+#   'BLACKLIST_AFTER_ROTATION': True,
+#   'UPDATE_LAST_LOGIN': False,
+#   'ALGORITHM': 'HS256',
+#   'SIGNING_KEY': SECRET_KEY,
+#   'VERIFYING_KEY': None,
+#   'AUDIENCE': None,
+#   'ISSUER': None,
+#   'AUTH_HEADER_TYPES': ('Bearer',),
+#   'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
+#   'USER_ID_FIELD': 'id',
+#   'USER_ID_CLAIM': 'user_id',
+#   'USER_AUTHENTICATION_RULE': 'rest_framework_simplejwt.authentication.default_user_authentication_rule',
+#   'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
+#   'TOKEN_TYPE_CLAIM': 'token_type',
+#   'JTI_CLAIM': 'jti',
+#   'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
+#   'SLIDING_TOKEN_LIFETIME': timedelta(minutes=10),
+#   'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
+
+#   # custom
+#   'AUTH_COOKIE': 'access_token',  # Cookie name. Enables cookies if value is set# .
+#   'AUTH_COOKIE_REFRESH': 'refresh_token',
+#   'AUTH_COOKIE_DOMAIN': None,     # A string like "example.com", or None for standard domain cookie.
+#   'AUTH_COOKIE_SECURE': False,    # Whether the auth cookies should be secure (https:// only).
+#   'AUTH_COOKIE_HTTP_ONLY': True,  # Http only cookie flag.It's not fetch by javascript.
+#   'AUTH_COOKIE_PATH': '/',        # The path of the auth cookie.
+#   'AUTH_COOKIE_SAMESITE': 'Lax',  # Whether to set the flag restricting cookie leaks on cross-site requests.\
+#                                   # This can be 'Lax', 'Strict', or None to disable the flag.
+# }
+
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME")
+AWS_DEFAULT_REGION = os.getenv("AWS_DEFAULT_REGION")
+
+DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
+STATICFILE_STORAGE = "storages.backends.s3boto3.S3StaticStorage"
+
+AWS_S3_FILE_OVERWRITE = True
+AWS_QUERYSTRING_AUTH = False
+AWS_DEFAULT_ACL = "public-read"
+
+AWS_S3_OBJECT_PARAMETERS = {
+    "CacheControl": "max-age=86400",
 }
+
+ALLOWED_FILE_EXTENSIONS = (
+    "jpeg",
+    "jpg",
+)
+
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL")
+
+CELERY_BROKER_URL = "amqp://guest:guest@rabbitmq:5672/"
+CELERY_BROKER_TRANSPORT_OPTIONS = {"visibility_timeout": 3600}
+CELERY_ACCEPT_CONTENT = ("application/json",)
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"

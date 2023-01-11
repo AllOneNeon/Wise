@@ -15,8 +15,17 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import include, path
+from core.urls import router as pages_router
+from core.urls import router as posts_router
+from rest_framework import routers
+from user.urls import router as users_router
+
+router = routers.DefaultRouter()
+router.registry.extend(pages_router.registry)
+router.registry.extend(posts_router.registry)
+router.registry.extend(users_router.registry)
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('api/', include('innotter.api_urls', namespace='api')),
+    path("admin/", admin.site.urls),
+    path("api/v1/", include(router.urls)),
 ]

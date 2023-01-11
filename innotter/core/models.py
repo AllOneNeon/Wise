@@ -1,38 +1,50 @@
 from django.db import models
-import uuid
-from user.models import User
+
 
 class Page(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    owner = models.ForeignKey('user.User', on_delete=models.CASCADE, related_name='pages')
+    """User page"""
+
     name = models.CharField(max_length=80)
+    uuid = models.CharField(max_length=30, unique=True)
     description = models.TextField()
-    tag = models.ForeignKey('Tag', on_delete=models.CASCADE, related_name='tags')
-    image = models.FileField(max_length=30, null=True, blank=True)
+    tags = models.ManyToManyField("pages.Tag", related_name="pages")
+
+    owner = models.ForeignKey("users.User", on_delete=models.CASCADE, related_name="pages")
+    followers = models.ManyToManyField("users.User", related_name="follows")
+
+    image_s3_path = models.CharField(max_length=200, null=True, blank=True)
+
     is_private = models.BooleanField(default=False)
-    count_followers = models.IntegerField(default=0)
-    count_follow_requests = models.IntegerField(default=0)
+    follow_requests = models.ManyToManyField("users.User", related_name="requests")
+
     unblock_date = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True, auto_now=False)
-    updated_at = models.DateTimeField(auto_now=True, auto_now_add=False)
+    is_blocked = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.name
+
 
 class Tag(models.Model):
+    """Tag"""
+
     name = models.CharField(max_length=30, unique=True)
 
+    def __str__(self):
+        return self.name
+
+
 class Post(models.Model):
-    page = models.ForeignKey('Page', on_delete=models.CASCADE, related_name='posts')
+    """Post on the page"""
+
+    page = models.ForeignKey("pages.Page", on_delete=models.CASCADE, related_name="posts")
     content = models.CharField(max_length=180)
-    reply_to = models.ForeignKey('Post', on_delete=models.SET_NULL, null=True, blank=True, related_name='replies')
+
+    reply_to = models.ForeignKey("self", on_delete=models.SET_NULL, null=True, related_name="replies")
+
+    likers = models.ManyToManyField("users.User", related_name="likers", blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    total_likes = models.IntegerField(default=0)
 
-class Like(models.Model):
-    user = models.ForeignKey(User, related_name='likes', on_delete=models.CASCADE)
-    post = models.ForeignKey('Post', related_name='like_post', on_delete=models.CASCADE)
-
-class Subscriber(models.Model):
-    subscriber = models.ForeignKey(User, related_name='subscribers', on_delete=models.CASCADE)
-    follower = models.ForeignKey('Page', related_name='followers', on_delete=models.CASCADE, blank=True, null=True,)
-    follow_requests = models.ForeignKey('Page', related_name='follow_requests', on_delete=models.CASCADE, blank=True, null=True)
-
+    def __str__(self):
+        return self.content
